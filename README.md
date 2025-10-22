@@ -37,7 +37,7 @@ Essas operações permitem estudar, visualizar e comparar o impacto de diferente
 ### ▶️ Modo Terminal / Colab
 1. Clone ou baixe o repositório:  
    ```bash
-   git clone https://github.com/<usuario>/procimg-grupo4.git
+   git clone https://github.com/renan-fr/procimg-grupo4.git
    cd procimg-grupo4
    ```
 2. Instale as dependências:  
@@ -89,13 +89,21 @@ Interface web desenvolvida por **Rafael Passos Sampaio**, permitindo comparar a 
 ```bash
 📂 procimg-grupo4/
  ┣ 📁 src/
- ┃ ┣ procimg_cli.py         → versão de linha de comando (CLI)
- ┃ ┣ frontend/              → interface web (em desenvolvimento)
- ┃ ┣ utils/                 → funções auxiliares
- ┣ 📁 saidas/               → imagens resultantes das operações
- ┣ README.md                → documentação geral do projeto
- ┣ requirements.txt         → dependências necessárias
+ ┃ ┣ 📁 frontend/               → interface web (em desenvolvimento)
+ ┃ ┣ 📁 funcoes/                → funções implementadas e em desenvolvimento
+ ┃ ┃ ┣ dessaturacao_seletiva_tagore.py
+ ┃ ┃ ┣ imports.py
+ ┃ ┃ ┣ mapeamento_cores_renan.py
+ ┃ ┃ ┗ mudanca_de_cor_lenio.py
+ ┃ ┣ 📁 utils/                  → funções auxiliares
+ ┃ ┣ procimg_cli.py             → versão de linha de comando (CLI)
+ ┣ 📁 saidas/                   → imagens resultantes das operações
+ ┣ .gitignore                   → arquivos ignorados pelo Git
+ ┣ README.md                    → documentação geral do projeto
+ ┣ requirements.txt             → dependências necessárias
 ```
+
+> ⚙️ As funções principais estão organizadas em `src/funcoes/`, e serão aprimoradas nas próximas versões conforme o andamento do desenvolvimento do grupo.
 
 ---
 
