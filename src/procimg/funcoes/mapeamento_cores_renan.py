@@ -1,3 +1,6 @@
+import cv2 as cv
+import numpy as np
+import matplotlib.pylab as plt
 # A função mapear_cores() converte a imagem em tons de cinza e aplica uma LUT (Look-Up Table) para gerar uma nova versão colorida, destacando padrões e contrastes. 
 # São usadas paletas predefinidas do OpenCV (como VIRIDIS, HOT, JET e TURBO). 
 # Após o processamento, a função exibe a comparação visual antes/depois e histogramas do canal de luminância (LAB-L) para análise quantitativa.

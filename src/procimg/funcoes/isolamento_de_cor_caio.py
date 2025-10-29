@@ -1,3 +1,6 @@
+import cv2 as cv
+import numpy as np
+import matplotlib.pylab as plt
 def isolar_cor(imagem_path, cor='vermelho'):
     # Lê a imagem
     imagem = cv.imread(imagem_path)

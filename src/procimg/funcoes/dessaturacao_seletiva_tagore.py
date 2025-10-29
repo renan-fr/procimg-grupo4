@@ -1,5 +1,5 @@
-# Para chamar a função é preciso informar caminho da imagem original, caminho da mascara e o caminho para salvar a imagem. 
-# dessatiracao_seletiva(/content/imagem.png , /content/mascara.png , /content/imagem_resultante.png)
+import cv2 as cv
+import numpy as np
 
 def dessaturacao_seletiva(imagem_caminho, mascara_caminho, saida_caminho):
      # Carrega a imagem

@@ -1,3 +1,6 @@
+import cv2 as cv
+import numpy as np
+import matplotlib.pylab as plt
 def substituir_cor(caminho_imagem, cor_alvo, nova_cor):
     """
     Substitui uma das cores principais (vermelho, verde ou azul) por outra cor.
