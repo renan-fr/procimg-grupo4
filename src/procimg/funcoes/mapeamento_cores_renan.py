@@ -52,10 +52,3 @@ def mapear_cores(img_bgr, nome_lut="VIRIDIS"):
     plt.show()
 
     return img_mapeada
-
-# Exemplo simples
-imagem = cv.imread("/content/imagem_exemplo.jpg")
-resultado = mapear_cores(imagem, "VIRIDIS")
-
-# Salvar resultado
-cv.imwrite("/content/resultado_viridis.png", resultado)
