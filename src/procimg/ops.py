@@ -400,91 +400,24 @@ OPS = {
     ),
 }
 
-# --- override DINÂMICO: dessaturacao-seletiva ---
-import inspect
 
-def _h_to_nome(h: int) -> str:
-    pal = [("vermelho",0),("laranja",15),("amarelo",30),("verde",60),
-           ("ciano",90),("azul",120),("roxo",150),("magenta",165),("rosa",170)]
-    return min(pal, key=lambda kv: min(abs(kv[1]-h), 180-abs(kv[1]-h)))[0]
+# ---------- dessaturacao-seletiva (mapeamento limpo) ----------
+from typing import Any as _Any
 
-def _bgr_to_h(bgr: tuple[int,int,int]) -> int:
-    import numpy as np, cv2 as cv
-    patch = np.uint8([[bgr]])
-    return int(cv.cvtColor(patch, cv.COLOR_BGR2HSV)[0,0,0])
 
-def _mad(a, b):
-    import numpy as np
-    return float(np.mean(np.abs(a.astype(np.int16) - b.astype(np.int16))))
-
-def _call_dessat_dynamic(img, a):
+def _dessat_kwargs_from_ui(a) -> dict[str, _Any]:
     """
-    Mapeia parâmetros conforme a assinatura real da função:
-    - tol_h  <-> tolerancia_h
-    - s_bg (0–255)  <-> fator (0–1)  [1 - intensidade]
+    Compatível com dessaturacao_seletiva(img_bgr, cor="vermelho", fator=0.5).
+    - 'cor' (BGR da UI) -> nome aproximado via hue
+    - 'intensidade' (0–1) na UI -> 'fator' (0–1) **direto**
     """
-    import numpy as np
-    fn = dessaturacao_seletiva_fn
-    if fn is None:
-        if DEBUG_OPS: print("[ops] dessat: função não importada -> fallback")
-        return _fallback_passthrough(img)
+    cor_bgr = getattr(a, "cor", (0, 0, 255))
+    intensidade = float(getattr(a, "intensidade", 0.6))
+    cor_nome = _h_to_nome(_bgr_to_h(cor_bgr))
+    return {"cor": cor_nome, "fator": intensidade}
 
-    # inputs simples para a UI:
-    cor_nome = _h_to_nome(_bgr_to_h(getattr(a, "cor", (0,255,0))))
-    intensidade = float(getattr(a, "intensidade", 1.0))   # 0=off, 1=PB total no fundo
-
-    # defaults "seguros"
-    base = {
-        "cor": cor_nome,
-        "tol_h": 20,
-        "s_min": 20,
-        "v_min": 20,
-        "s_bg": int(255 * (1.0 - intensidade)),  # nossa escala
-        "fator": 1.0 - intensidade               # alternativa 0–1
-    }
-
-    # lê assinatura real
-    try:
-        sig = inspect.signature(fn)
-        params = set(sig.parameters.keys())
-    except Exception:
-        params = set()
-
-    # monta kwargs mapeando nomes existentes
-    kwargs = {}
-    for k, v in base.items():
-        # troca de nomes reconhecidos
-        if k == "tol_h":
-            if "tol_h" in params: kwargs["tol_h"] = v
-            elif "tolerancia_h" in params: kwargs["tolerancia_h"] = v
-        elif k == "s_bg":
-            if "s_bg" in params: kwargs["s_bg"] = v
-        elif k == "fator":
-            if "fator" in params: kwargs["fator"] = v
-        else:
-            if k in params: kwargs[k] = v
-
-    # chama
-    if DEBUG_OPS: print(f"[ops] dessat kwargs -> {kwargs}")
-    res = _call(fn, img, **kwargs)
-    out = res.get("img")
-    if isinstance(out, np.ndarray):
-        m = _mad(out, img)
-        if DEBUG_OPS: print(f"[ops] dessat MAD={m:.3f}")
-        # se quase zero, tenta agressivo
-        if m < 0.5:
-            if DEBUG_OPS: print("[ops] dessat: reforçando (tol_h=30, PB=100%)")
-            if "tol_h" in kwargs: kwargs["tol_h"] = 30
-            if "tolerancia_h" in kwargs: kwargs["tolerancia_h"] = 30
-            if "s_bg" in kwargs: kwargs["s_bg"] = 255
-            if "fator" in kwargs: kwargs["fator"] = 1.0
-            res2 = _call(fn, img, **kwargs)
-            out2 = res2.get("img")
-            if isinstance(out2, np.ndarray):
-                m2 = _mad(out2, img)
-                if DEBUG_OPS: print(f"[ops] dessat (reforçado) MAD={m2:.3f}")
-                if m2 > m: return res2
-        return res
-    return res
-
-OPS["dessaturacao-seletiva"] = lambda img, a: _call_dessat_dynamic(img, a)
+OPS["dessaturacao-seletiva"] = lambda img, a: (
+    {"img": img, "warning": "dessaturacao-seletiva: implementação não encontrada (fallback)"}
+    if dessaturacao_seletiva_fn is None else
+    _call(dessaturacao_seletiva_fn, img, **_dessat_kwargs_from_ui(a))
+)

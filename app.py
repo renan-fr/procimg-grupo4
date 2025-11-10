@@ -1,4 +1,4 @@
-# app.py — ProcIMG (Streamlit)
+# app.py — Sistema de Manipulação de Canais de Cor
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -65,7 +65,6 @@ def pil_to_bgr(img_any):
             arr = np.array(img_any)
         else:
             arr = img_any
-
         if arr is None:
             return None
         if isinstance(arr, np.ndarray):
@@ -144,8 +143,8 @@ def show_luts_pair(lut_a: str, lut_b: str, img_bgr: np.ndarray | None):
 # Interface
 # =============================
 
-st.set_page_config(page_title="ProcIMG — Streamlit", layout="wide")
-st.title("ProcIMG — Análise de Cores (Streamlit)")
+st.set_page_config(page_title="Sistema de Manipulação de Canais de Cor", layout="wide")
+st.title("Sistema de Manipulação de Canais de Cor")
 
 left, right = st.columns([1, 1])
 
@@ -187,22 +186,11 @@ with right:
 
     if op == "mapear-cores":
         a.lut = st.selectbox("LUT", CV_LUTS, index=0)
-
-        # Botão de visualização dos LUTs
-        if st.button("Visualizar todos os LUTs"):
-            show_luts_gradients()
-
-        # Comparar dois LUTs
         c1, c2 = st.columns(2)
         with c1:
-            lut_a = st.selectbox("Comparar A", CV_LUTS,
-                                 index=CV_LUTS.index("TURBO") if "TURBO" in CV_LUTS else 0,
-                                 key="lut_a")
+            lut_a = st.selectbox("Comparar A", CV_LUTS, index=0, key="lut_a")
         with c2:
-            lut_b = st.selectbox("Comparar B", CV_LUTS,
-                                 index=CV_LUTS.index("JET") if "JET" in CV_LUTS else 1,
-                                 key="lut_b")
-
+            lut_b = st.selectbox("Comparar B", CV_LUTS, index=1, key="lut_b")
         if st.button("Comparar LUTs (gradiente + imagem)"):
             show_luts_pair(lut_a, lut_b, img)
 
@@ -252,7 +240,6 @@ with right:
                 if isinstance(out_raw, (tuple, list)):
                     candidatos.extend(list(out_raw))
                 out_img = first_ndarray(*candidatos)
-
                 if out_img is None or not isinstance(out_img, np.ndarray):
                     st.error("A operação não retornou uma imagem válida.")
                     st.write({
@@ -260,7 +247,6 @@ with right:
                         "chaves_detectadas": list(out_dict.keys())
                     })
                     st.stop()
-
                 if img.shape == out_img.shape and img.dtype == out_img.dtype:
                     mad = float(np.mean(np.abs(out_img.astype(np.int16) - img.astype(np.int16))))
                     if mad < 0.5:
@@ -268,14 +254,11 @@ with right:
                             "A saída parece idêntica à entrada. Ajuste parâmetros (ex.: tolerância/ganho) "
                             "ou verifique se a função está em fallback."
                         )
-
                 st.success("Operação concluída.")
                 show_image(f"Saída — {op}", out_img)
-
                 stem = "upload" if origem == "upload" else Path(origem).stem
                 out_path = SAIDAS_DIR / f"{stem}__{op}.png"
                 cv.imwrite(str(out_path), out_img)
-
                 _, buf = cv.imencode(".png", out_img)
                 st.download_button(
                     label="Baixar imagem processada (.png)",
@@ -288,6 +271,10 @@ with right:
                 st.exception(e)
 
 st.divider()
-st.markdown(
-    "Dica: Coloque imagens em **entradas/** para testá-las rapidamente. Saídas vão para **saidas/** automaticamente."
-)
+st.markdown("Dica: Coloque imagens em **entradas/** para testá-las rapidamente. Saídas vão para **saidas/** automaticamente.")
+
+# --- Créditos (rodapé discreto) ---
+st.divider()
+with st.expander("Créditos", expanded=False):
+    st.caption("Processamento de Imagens de Computação Gráfica · Universidade Tiradentes (UNIT/SE) · Ciências da Computação · Prof.ª Layse Santos Souza · 2º/2025")
+    st.markdown("Ricardo D. Xavier · Lênio M. de Moura Morais · Caio F. H. Góis · Renan S. Ferreira · Tágore C. Paraizo")
