@@ -9,26 +9,23 @@ import matplotlib.pylab as plt
 # Para chamar a função só precisamos entregar a imagem e o número do Hue adicionado
 # a função é chamada assim mudar_hue(imagemSelecionada, hueAdicionado)
 
+
 def mudar_hue(img_bgr, deslocamento_hue):
+    """Desloca o canal H (0-179) no HSV e retorna BGR uint8.
+    Ajuste mínimo: remover plt.show(), normalizar tipos e retornar dict.
+    """
+    import numpy as np
+    import cv2 as cv
+    assert img_bgr is not None and img_bgr.ndim==3 and img_bgr.shape[2]==3, "img_bgr inválida"
     hsv = cv.cvtColor(img_bgr, cv.COLOR_BGR2HSV)
     h, s, v = cv.split(hsv)
-
-    h = (h.astype(np.int32) + deslocamento_hue) % 180
-    h = h.astype(np.uint8)
-    hsv_modificado = cv.merge([h, s, v])
-
-    img_bgr_modificada = cv.cvtColor(hsv_modificado, cv.COLOR_HSV2BGR)
-    plt.figure(figsize=(10,5))
-
-    plt.subplot(1,2,1)
-    plt.title("Original")
-    plt.imshow(cv.cvtColor(img_bgr, cv.COLOR_BGR2RGB))
-    plt.axis("off")
-
-    plt.subplot(1,2,2)
-    plt.title(f"Hue +{deslocamento_hue}")
-    plt.imshow(cv.cvtColor(img_bgr_modificada, cv.COLOR_BGR2RGB))
-    plt.axis("off")
-
-    plt.show()
-
+    h = (h.astype(np.int16) + int(deslocamento_hue)) % 180
+    hsv2 = cv.merge([h.astype(np.uint8), s, v])
+    out = cv.cvtColor(hsv2, cv.COLOR_HSV2BGR)
+    return {
+        "image": out,
+        "images": None,
+        "table": None,
+        "plots": None,
+        "meta": {"name":"mudar_hue","params":{"deslocamento_hue":int(deslocamento_hue)}}
+    }

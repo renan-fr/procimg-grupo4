@@ -69,7 +69,7 @@ def _normalize_output(result: Any) -> dict[str, Any]:
       - ndarray -> {'img': ndarray}
       - PIL.Image -> {'img': ndarray BGR}
       - str/path -> lê com cv.imread -> {'img': ndarray}
-      - dict com 'img' (inclusive aninhado) -> idem
+      - dict -> aceita chaves 'img' | 'image' | 'output' | 'out' | 'result'
       - tuple/list -> pega o primeiro item útil
     """
     # ndarray
@@ -83,19 +83,27 @@ def _normalize_output(result: Any) -> dict[str, Any]:
 
     # dict
     if isinstance(result, dict):
-        img_val = result.get("img")
-        # desaninha {"img": {"img": ...}}
-        if isinstance(img_val, dict) and "img" in img_val:
-            img_val = img_val["img"]
-        if isinstance(img_val, (str, Path)):
-            return {"img": _path_to_bgr(img_val)}
-        if isinstance(img_val, np.ndarray):
-            return {"img": img_val}
-        bgr = _pil_to_bgr(img_val)
-        if isinstance(bgr, np.ndarray):
-            return {"img": bgr}
-        # sem imagem válida: devolve bruto pra debug
-        return {"img": None, **{k: v for k, v in result.items() if k != "img"}}
+        # tenta várias chaves usuais
+        for key in ("img", "image", "output", "out", "result"):
+            if key in result:
+                val = result[key]
+                # desaninha {'image': {'image': ...}} etc.
+                if isinstance(val, dict):
+                    for subk in ("img", "image", "output", "out", "result"):
+                        if subk in val:
+                            val = val[subk]
+                            break
+                if isinstance(val, (str, Path)):
+                    return {"img": _path_to_bgr(val)}
+                if isinstance(val, np.ndarray):
+                    return {"img": val}
+                bgr = _pil_to_bgr(val)
+                if isinstance(bgr, np.ndarray):
+                    return {"img": bgr}
+        # sem imagem válida: devolve bruto p/ debug
+        out = {"img": None}
+        out.update({k: v for k, v in result.items() if k not in ("img", "image", "output", "out", "result")})
+        return out
 
     # tuple/list
     if isinstance(result, (tuple, list)):
@@ -160,7 +168,7 @@ dessaturacao_seletiva_fn = _import_any(
 
 substituir_cor_fn = _import_any(
     "procimg.funcoes.substituicao_de_cor_caio",
-    ["substituir_cor", "substituicao_cor", "replace_color"]
+    ["substituir_cor", "substituicao_cor", "replace_color", "trocar_cor"]
 )
 
 mudar_hue_fn = _import_any(
@@ -320,13 +328,96 @@ def _call_substituir_cor(fn, img, **params):
     params_rgb["destino"] = bgr_to_rgb(cor_destino)
     return _call(fn, img, **params_rgb)
 
+# ==== helpers p/ adaptar UI -> funções ====
+def _h_to_nome(h: int) -> str:
+    pal = [
+        ("vermelho", 0), ("laranja", 15), ("amarelo", 30), ("verde", 60),
+        ("ciano", 90), ("azul", 120), ("roxo", 150), ("magenta", 165), ("rosa", 170),
+    ]
+    return min(pal, key=lambda kv: min(abs(kv[1]-h), 180-abs(kv[1]-h)))[0]
+
+def _bgr_to_h(bgr: tuple[int,int,int]) -> int:
+    patch = np.uint8([[bgr]])  # (1,1,3) BGR
+    hsv = cv.cvtColor(patch, cv.COLOR_BGR2HSV)
+    return int(hsv[0,0,0])
+
 
 # ---------- Registro de operações ----------
 OPS = {
-    "mapear-cores":           lambda img, a: _call(mapear_cores_fn or _fallback_mapear_cores, img, nome_lut=a.lut),
-    "isolamento-cor":         lambda img, a: _call(isolamento_de_cor_fn or _fallback_passthrough, img, cor=a.cor, tolerancia=a.tol),
-    "realce-cor":             lambda img, a: _call(realcar_cor_fn or _fallback_passthrough, img, ganho=a.ganho),
-    "dessaturacao-seletiva":  lambda img, a: _call(dessaturacao_seletiva_fn or _fallback_passthrough, img, cor=a.cor, fator=a.fator),
-    "substituicao-cor":       lambda img, a: _call_substituir_cor(substituir_cor_fn, img, origem=a.cor_origem, destino=a.cor_destino, tol=a.tol),
-    "mudar-hue":              lambda img, a: _call(mudar_hue_fn or _fallback_passthrough, img, deslocamento_hue=a.hue),
+    # app: "mapear-cores" -> mapear_cores(img, nome_lut)
+    "mapear-cores": lambda img, a: _call(
+        mapear_cores_fn or _fallback_mapear_cores,
+        img,
+        nome_lut=getattr(a, "lut", "VIRIDIS"),
+    ),
+
+    # app: "isolamento-cor" -> isolamento_cor(img, cor="nome", tolerancia_h, s_min, v_min)
+    # UI manda cor em BGR e tol 0–100
+    "isolamento-cor": lambda img, a: _call(
+        isolamento_de_cor_fn or _fallback_passthrough,
+        img,
+        cor=_h_to_nome(_bgr_to_h(getattr(a, "cor", (0,255,0)))),
+        tolerancia_h=int(getattr(a, "tol", 20)),
+        s_min=60, v_min=50,
+    ),
+
+    # app: "realce-cor" -> realce_cor(img, ganho_s, ganho_v)
+    # UI tem um slider único "ganho" (S); V = 1.0
+    "realce-cor": lambda img, a: _call(
+        realcar_cor_fn or _fallback_passthrough,
+        img,
+        ganho_s=float(getattr(a, "ganho", 1.5)),
+        ganho_v=1.0,
+    ),
+
+    # app: "dessaturacao-seletiva" -> dessaturacao_seletiva(img, cor="nome", tol_h, s_min, v_min, s_bg)
+    # UI manda cor em BGR e "fator (0–1)" p/ fundo -> s_bg = 255*fator
+    "dessaturacao-seletiva": lambda img, a: _call(
+        dessaturacao_seletiva_fn or _fallback_passthrough,
+        img,
+        cor=_h_to_nome(_bgr_to_h(getattr(a, "cor", (0,0,255)))),
+        tol_h=12, s_min=60, v_min=50,
+        s_bg=int(255*float(getattr(a, "fator", 0.5))),
+    ),
+
+    # app: "substituicao-cor" -> trocar_cor(img, cor_original, cor_nova, tolerancia_h, s_min, v_min, alpha)
+    # UI manda origem/destino em BGR e tol 0–100
+    "substituicao-cor": lambda img, a: _call(
+        substituir_cor_fn or _fallback_passthrough,
+        img,
+        cor_original=_h_to_nome(_bgr_to_h(getattr(a, "cor_origem", (255,0,0)))),
+        cor_nova=_h_to_nome(_bgr_to_h(getattr(a, "cor_destino", (0,0,255)))),
+        tolerancia_h=int(getattr(a, "tol", 15)),
+        s_min=60, v_min=50,
+        alpha=1.0,
+    ),
+
+    # app: "mudar-hue" -> mudar_hue(img, deslocamento_hue)
+    "mudar-hue": lambda img, a: _call(
+        mudar_hue_fn or _fallback_passthrough,
+        img,
+        deslocamento_hue=int(getattr(a, "hue", 30)),
+    ),
 }
+
+
+# ---------- dessaturacao-seletiva (mapeamento limpo) ----------
+from typing import Any as _Any
+
+
+def _dessat_kwargs_from_ui(a) -> dict[str, _Any]:
+    """
+    Compatível com dessaturacao_seletiva(img_bgr, cor="vermelho", fator=0.5).
+    - 'cor' (BGR da UI) -> nome aproximado via hue
+    - 'intensidade' (0–1) na UI -> 'fator' (0–1) **direto**
+    """
+    cor_bgr = getattr(a, "cor", (0, 0, 255))
+    intensidade = float(getattr(a, "intensidade", 0.6))
+    cor_nome = _h_to_nome(_bgr_to_h(cor_bgr))
+    return {"cor": cor_nome, "fator": intensidade}
+
+OPS["dessaturacao-seletiva"] = lambda img, a: (
+    {"img": img, "warning": "dessaturacao-seletiva: implementação não encontrada (fallback)"}
+    if dessaturacao_seletiva_fn is None else
+    _call(dessaturacao_seletiva_fn, img, **_dessat_kwargs_from_ui(a))
+)
