@@ -1,24 +1,27 @@
 import cv2 as cv
 import numpy as np
-import matplotlib.pylab as plt
-# A função realce_cor() converte a imagem do modelo BGR para o modelo HSV, onde o canal S(Saturação) controla a intensidade da cor, então multiplicamos 
-# o canal de saturação pelo valor de fator_saturacao e então a imagem é convertida de volta ao modelo BGR e exibe a imagem antes e depois do realce.
 
-def realce_cor(img_path, fator_saturacao=1.5):
+def realce_cor(img_bgr, ganho_s=1.2, ganho_v=1.0):
+    """
+    Ajusta saturação (S) e valor (V) no espaço HSV.
+    - Entrada: img_bgr (uint8, BGR)
+    - Saída: dict com "image" (BGR uint8) e meta
+    """
+    assert img_bgr is not None and img_bgr.ndim==3 and img_bgr.shape[2]==3, "img_bgr inválida"
 
-    img = cv.imread(img_path)
-
-    hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
-
+    hsv = cv.cvtColor(img_bgr, cv.COLOR_BGR2HSV).astype(np.float32)
     h, s, v = cv.split(hsv)
 
-    s = np.clip(s * fator_saturacao, 0, 255).astype(np.uint8)
+    s = np.clip(s * float(ganho_s), 0, 255)
+    v = np.clip(v * float(ganho_v), 0, 255)
 
-    hsv_realce = cv.merge([h, s, v])
+    hsv2 = cv.merge([h, s, v]).astype(np.uint8)
+    out = cv.cvtColor(hsv2, cv.COLOR_HSV2BGR)
 
-    img_realce = cv.cvtColor(hsv_realce, cv.COLOR_HSV2BGR)
-
-    print("Imagem original:")
-    cv.imshow(img)
-    print("Imagem com realce de cor:")
-    cv.imshow(img_realce)
+    return {
+        "image": out,
+        "images": None,
+        "table": None,
+        "plots": None,
+        "meta": {"name":"realce_cor","params":{"ganho_s":ganho_s,"ganho_v":ganho_v}}
+    }
