@@ -217,6 +217,25 @@ with right:
 
     elif op == "mudar-hue":
         a.hue = st.slider("Deslocamento de Hue (OpenCV 0–179)", 0, 179, 30)
+
+    elif op == "equaliza-canais":
+        a.space = st.selectbox("Espaço de cor", ["lab", "hsv", "rgb"], index=0, key="eq_space")
+        a.metodo = st.selectbox("Método", ["clahe", "hist"], index=0, key="eq_metodo")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            a.clip = st.slider("CLAHE clipLimit", 1.0, 8.0, 3.0, step=0.5)
+        with c2:
+            a.tiles = st.slider("CLAHE tiles", 4, 16, 8, step=2)
+
+        canais_sel = st.multiselect("Canais a equalizar (0, 1, 2)",
+                                    options=[0, 1, 2],
+                                    default=[0, 1, 2],
+                                    key="eq_canais")
+        a.canais = canais_sel if canais_sel else None
+
+        st.caption("Dica: em LAB, 0=L (luminosidade), 1=A, 2=B. Em HSV, 0=H, 1=S, 2=V. Em RGB, 0=R, 1=G, 2=B.")
+
     else:
         st.warning("Operação sem UI dedicada — nenhum parâmetro adicional.")
 

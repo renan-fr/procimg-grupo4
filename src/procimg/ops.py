@@ -328,6 +328,80 @@ def _call_substituir_cor(fn, img, **params):
     params_rgb["destino"] = bgr_to_rgb(cor_destino)
     return _call(fn, img, **params_rgb)
 
+# ------------------------------------------------------------
+# equaliza-canais (núcleo) — retorna {'img': BGR}
+# ------------------------------------------------------------
+def _equaliza_canais_core(
+    img_bgr: "np.ndarray",
+    space: str = "lab",          # "rgb" | "hsv" | "lab"
+    metodo: str = "clahe",       # "clahe" | "hist"
+    canais=None,                 # None => todos; ex.: [0], [0,1]
+    clip: float = 3.0,           # CLAHE
+    tiles: int = 8,              # CLAHE (tiles x tiles)
+) -> dict:
+    """
+    Equaliza contraste por canal no espaço escolhido.
+    Retorna {'img': ndarray BGR} para encaixar no app atual.
+    """
+    s = (space or "lab").lower()
+
+    # BGR -> espaço alvo
+    if s == "rgb":
+        work = cv.cvtColor(img_bgr, cv.COLOR_BGR2RGB)
+    elif s == "hsv":
+        work = cv.cvtColor(img_bgr, cv.COLOR_BGR2HSV)
+    elif s == "lab":
+        work = cv.cvtColor(img_bgr, cv.COLOR_BGR2LAB)
+    else:
+        if DEBUG_OPS:
+            print(f"[equaliza-canais] espaço inválido: {space}. Mantendo BGR.")
+        return {"img": img_bgr}
+
+    # separa canais
+    if work.ndim == 2:
+        chs = [work]
+    else:
+        chs = [work[..., 0], work[..., 1], work[..., 2]]
+
+    if canais is None:
+        canais = list(range(len(chs)))
+
+    # equalização
+    metodo = (metodo or "clahe").lower()
+    if metodo == "hist":
+        for i in canais:
+            chs[i] = cv.equalizeHist(chs[i])
+    elif metodo == "clahe":
+        clahe = cv.createCLAHE(
+            clipLimit=float(clip if clip is not None else 3.0),
+            tileGridSize=(int(tiles or 8), int(tiles or 8)),
+        )
+        for i in canais:
+            chs[i] = clahe.apply(chs[i])
+    else:
+        if DEBUG_OPS:
+            print(f"[equaliza-canais] método desconhecido: {metodo}. Sem alteração.")
+
+    # junta e volta pra BGR
+    if len(chs) == 1:
+        merged = chs[0]
+        if s == "rgb":
+            out_bgr = cv.cvtColor(merged, cv.COLOR_RGB2BGR)
+        elif s == "hsv":
+            out_bgr = cv.cvtColor(merged, cv.COLOR_HSV2BGR)
+        else:
+            out_bgr = cv.cvtColor(merged, cv.COLOR_LAB2BGR)
+        return {"img": out_bgr}
+
+    work2 = np.stack(chs, axis=-1)
+    if s == "rgb":
+        out_bgr = cv.cvtColor(work2, cv.COLOR_RGB2BGR)
+    elif s == "hsv":
+        out_bgr = cv.cvtColor(work2, cv.COLOR_HSV2BGR)
+    else:
+        out_bgr = cv.cvtColor(work2, cv.COLOR_LAB2BGR)
+    return {"img": out_bgr}
+
 # ==== helpers p/ adaptar UI -> funções ====
 def _h_to_nome(h: int) -> str:
     pal = [
@@ -398,6 +472,17 @@ OPS = {
         img,
         deslocamento_hue=int(getattr(a, "hue", 30)),
     ),
+
+    # equalização por canal (compatível com UI atual – 1 imagem)
+    "equaliza-canais": lambda img, a: _equaliza_canais_core(
+        img,
+        space=getattr(a, "space", "lab"),       # padrão LAB
+        metodo=getattr(a, "metodo", "clahe"),   # "clahe" | "hist"
+        canais=getattr(a, "canais", None),      # None => todos
+        clip=getattr(a, "clip", 3.0),
+        tiles=getattr(a, "tiles", 8),
+    ),
+
 }
 
 
