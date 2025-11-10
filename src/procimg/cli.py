@@ -1,54 +1,174 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-import argparse
-from pathlib import Path
-import sys
+from __future__ import annotations
+
 import cv2 as cv
-from .ops import OPS
+import numpy as np
+import typer
+from pathlib import Path
+from typing import Any, Callable
+from rich import print
+from rich.table import Table
+import types
 
-def parse_args():
-    p = argparse.ArgumentParser(prog="procimg", description="CLI do ProcIMG – operações de cor (OpenCV BGR).")
-    p.add_argument("--op", required=True, choices=OPS.keys(), help="Operação a executar")
-    p.add_argument("--in", dest="in_path", required=True, help="Caminho da imagem de entrada")
-    p.add_argument("--out", dest="out_path", required=False, help="Arquivo de saída (png/jpg)")
-    p.add_argument("--lut", default="VIRIDIS", help="LUT (VIRIDIS/JET/TURBO/...) p/ mapear-cores")
-    p.add_argument("--cor", default="vermelho", help="Cor alvo (vermelho|verde|azul)")
-    p.add_argument("--tol", type=int, default=20, help="Tolerância HSV")
-    p.add_argument("--ganho", type=float, default=1.2, help="Ganho p/ realce")
-    p.add_argument("--fator", type=float, default=0.2, help="Fator p/ dessaturação seletiva")
-    p.add_argument("--cor-origem", dest="cor_origem", default="vermelho", help="Cor origem p/ substituição")
-    p.add_argument("--cor-destino", dest="cor_destino", default="azul", help="Cor destino p/ substituição")
-    p.add_argument("--hue", type=int, default=20, help="Deslocamento de hue (0..179)")
-    return p.parse_args()
+try:
+    from . import ops as ops_mod  # módulo com suas operações
+except Exception as e:
+    ops_mod = None
+    _ops_import_err = e
+else:
+    _ops_import_err = None
 
-def main():
-    args = parse_args()
+app = typer.Typer(add_completion=False, help="PROCIMG — CLI para operações de cor (RGB/HSV/LAB)")
 
-    in_path = Path(args.in_path)
-    if not in_path.exists():
-        print(f"[ERRO] Entrada não encontrada: {in_path}", file=sys.stderr); sys.exit(1)
-
-    img = cv.imread(str(in_path))
+def _read(img_path: str) -> np.ndarray:
+    p = Path(img_path)
+    if not p.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {img_path}")
+    img = cv.imread(str(p), cv.IMREAD_COLOR)
     if img is None:
-        print("[ERRO] Falha ao ler a imagem (formato/caminho).", file=sys.stderr); sys.exit(2)
+        raise RuntimeError(f"Falha ao ler imagem: {img_path}")
+    return img
 
+def _write(img: np.ndarray, out_path: str):
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    if not cv.imwrite(out_path, img):
+        raise RuntimeError(f"Falha ao salvar: {out_path}")
+
+def _auto_cast(v: str) -> Any:
+    s = v.strip()
+    if s.lower() in {"true", "false"}:
+        return s.lower() == "true"
     try:
-        result = OPS[args.op](img, args)
-    except Exception as e:
-        print(f"[ERRO] Execução de '{args.op}': {e}", file=sys.stderr); sys.exit(3)
+        return int(s)
+    except ValueError:
+        pass
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    return s
 
-    out_img = result.get("img", None) if isinstance(result, dict) else result
-    if out_img is None:
-        print("[ERRO] Nenhuma imagem de saída gerada.", file=sys.stderr); sys.exit(4)
+def _parse_params(kv_list: list[str] | None) -> dict[str, Any]:
+    if not kv_list:
+        return {}
+    out: dict[str, Any] = {}
+    for item in kv_list:
+        if "=" not in item:
+            raise typer.BadParameter(f"Parâmetro inválido (use k=v): {item}")
+        k, v = item.split("=", 1)
+        out[k.strip()] = _auto_cast(v)
+    return out
 
-    default_out = Path("dados/saidas") / f"{in_path.stem}_{args.op}.png"
-    out_path = Path(args.out_path) if args.out_path else default_out
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+def _resolve_dispatch() -> Callable[[str, np.ndarray, dict[str, Any]], np.ndarray]:
+    """
+    Prioridade:
+    1) ops.dispatch(op, img, **params)
+    2) ops.OPS[op](img, **params)
+    3) getattr(ops, op)(img, **params)
+    """
+    if ops_mod is None:
+        raise RuntimeError(f"Não foi possível importar procimg.ops: {_ops_import_err}")
 
-    if not cv.imwrite(str(out_path), out_img):
-        print("[ERRO] Falha ao salvar a saída.", file=sys.stderr); sys.exit(5)
+    if hasattr(ops_mod, "dispatch"):
+        def _call1(op: str, img: np.ndarray, params: dict[str, Any]) -> np.ndarray:
+            return ops_mod.dispatch(op, img, **params)  # type: ignore[attr-defined]
+        return _call1
 
-    print(f"[OK] {args.op} → {out_path}")
+    if hasattr(ops_mod, "OPS"):
+        def _call2(op: str, img: np.ndarray, params: dict[str, Any]) -> np.ndarray:
+            OPS = getattr(ops_mod, "OPS")
+            if op not in OPS:
+                raise KeyError(f"Operação não encontrada em OPS: {op}")
+            fn = OPS[op]
+
+            # cria um namespace simulando 'args' para compatibilidade
+            args = types.SimpleNamespace(**params)
+            try:
+                return fn(img, args)  # compatível com funções do tipo (img, args)
+            except TypeError:
+                # fallback: tenta o formato antigo (img, **params)
+                return fn(img, **params)
+        return _call2
+
+    def _call3(op: str, img: np.ndarray, params: dict[str, Any]) -> np.ndarray:
+        if not hasattr(ops_mod, op):
+            raise KeyError(f"Operação não encontrada: {op}")
+        fn = getattr(ops_mod, op)
+        if not callable(fn):
+            raise TypeError(f"Símbolo não chamável em ops: {op}")
+        return fn(img, **params)  # type: ignore[misc]
+    return _call3
+
+def _discover_ops() -> list[str]:
+    if ops_mod is None:
+        return []
+    names: list[str] = []
+    if hasattr(ops_mod, "OPS"):
+        try:
+            names.extend(list(getattr(ops_mod, "OPS").keys()))
+        except Exception:
+            pass
+    for n in dir(ops_mod):
+        if n.startswith("_"):
+            continue
+        obj = getattr(ops_mod, n)
+        if callable(obj):
+            names.append(n)
+    return sorted(set(names))
+
+@app.command("ops")
+def list_ops():
+    """Lista operações detectadas em procimg.ops."""
+    ops = _discover_ops()
+    if not ops:
+        if _ops_import_err:
+            print(f"[red]Falha ao importar procimg.ops:[/red] {_ops_import_err}")
+        else:
+            print("[yellow]Nenhuma operação encontrada.[/yellow]")
+        raise typer.Exit(code=1)
+    tbl = Table(title="Operações disponíveis", show_lines=False)
+    tbl.add_column("#", justify="right", width=3)
+    tbl.add_column("op")
+    for i, name in enumerate(ops, 1):
+        tbl.add_row(str(i), name)
+    print(tbl)
+
+@app.command("run")
+def run(
+    op: str = typer.Option(..., "--op", help="Nome da operação"),
+    inp: str = typer.Option(..., "--in", help="Imagem de entrada (pode ser só o nome do arquivo)"),
+    out: str | None = typer.Option(None, "--out", help="Arquivo de saída; se omitido, salva em saidas/<nome>__<op>.png"),
+    param: list[str] = typer.Option(None, "--param", help="Parâmetros no formato k=v (pode repetir)"),
+):
+    """Executa uma operação sobre uma imagem."""
+    params = _parse_params(param)
+
+    # --- entrada: aceita nome simples e procura em 'entradas/' ---
+    in_path = Path(inp)
+    if not in_path.exists():
+        alt = Path("entradas") / inp
+        if alt.exists():
+            in_path = alt
+        else:
+            raise FileNotFoundError(f"Imagem não encontrada: {inp} (tente colocar em 'entradas/' ou passe o caminho completo)")
+
+    img = _read(str(in_path))
+
+    # --- operação ---
+    dispatch = _resolve_dispatch()
+    out_img = dispatch(op, img, params)
+    if not isinstance(out_img, np.ndarray):
+        raise TypeError("A operação não retornou uma imagem (np.ndarray)")
+
+    # --- saída: default automático em 'saidas/<stem>__<op>.png' ---
+    if out:
+        out_path = Path(out)
+    else:
+        out_dir = Path("saidas")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{in_path.stem}__{op}.png"
+
+    _write(out_img, str(out_path))
+    print(f"[green]OK[/green] {op} -> {out_path}")
 
 if __name__ == "__main__":
-    main()
+    app()
