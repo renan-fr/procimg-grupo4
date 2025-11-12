@@ -176,14 +176,42 @@ with left:
 # ---------- Painel de operação ----------
 with right:
     st.subheader("Operação")
-    ops_keys = list(ops_mod.OPS.keys())
-    if not ops_keys:
-        st.error("Nenhuma operação registrada em ops.OPS.")
+
+    # === NOVO: Modo (Transformar x Analisar) ===
+    MODO = st.radio("Modo", ["Transformar", "Analisar"], horizontal=True)
+    st.caption("TRANSFORMAÇÃO" if MODO == "Transformar" else "ANÁLISE")
+
+    # Buckets de operações
+    OPS_TRANSFORMAR = [
+        "mapear-cores",
+        "isolamento-cor",
+        "realce-cor",
+        "dessaturacao-seletiva",
+        "substituicao-cor",
+        "mudar-hue",
+        "equaliza-canais",
+    ]
+    OPS_ANALISAR = [
+        "separar-canais",
+        "compara-canais",
+        "calcular-estatisticas",
+        # futuros: "graficos-dispersao", "calcular-variacoes"
+    ]
+
+    # Filtra pela disponibilidade real em ops_mod.OPS
+    if MODO == "Transformar":
+        available_ops = [k for k in OPS_TRANSFORMAR if k in ops_mod.OPS]
+    else:
+        available_ops = [k for k in OPS_ANALISAR if k in ops_mod.OPS]
+
+    if not available_ops:
+        st.error("Nenhuma operação disponível para este modo.")
         st.stop()
 
-    op = st.selectbox("Escolha a operação", ops_keys)
+    op = st.selectbox("Escolha a operação", available_ops, key=f"op_{MODO}")
     a = SimpleNamespace()
 
+    # === UI específica por operação (Transformar) ===
     if op == "mapear-cores":
         a.lut = st.selectbox("LUT", CV_LUTS, index=0)
         c1, c2 = st.columns(2)
@@ -236,7 +264,18 @@ with right:
 
         st.caption("Dica: em LAB, 0=L (luminosidade), 1=A, 2=B. Em HSV, 0=H, 1=S, 2=V. Em RGB, 0=R, 1=G, 2=B.")
 
+    elif op == "compara-canais":
+        a.space = st.selectbox("Espaço de cor", ["rgb", "hsv", "lab"], index=0, key="cmp_space")
+        a.bins = st.slider("Bins do histograma", 16, 256, 64, step=16, key="cmp_bins")
+        st.caption("Dica: em HSV, H varia 0–179; S e V 0–255. Em RGB/LAB os três canais usam 0–255.")
+
+    elif op == "calcular-estatisticas":
+        sel = st.multiselect("Espaços de cor", ["rgb", "hsv", "lab"], default=["rgb", "hsv", "lab"], key="stats_spaces")
+        a.spaces = sel if sel else ["rgb", "hsv", "lab"]
+        st.caption("Calcula média, desvio padrão, mínimo, máximo e mediana por canal.")
+
     else:
+        # Modo Analisar → normalmente sem parâmetros adicionais
         st.warning("Operação sem UI dedicada — nenhum parâmetro adicional.")
 
     # Executar operação selecionada
@@ -268,7 +307,7 @@ with right:
                     st.stop()
                 if img.shape == out_img.shape and img.dtype == out_img.dtype:
                     mad = float(np.mean(np.abs(out_img.astype(np.int16) - img.astype(np.int16))))
-                    if mad < 0.5:
+                    if mad < 0.5 and MODO == "Transformar":
                         st.warning(
                             "A saída parece idêntica à entrada. Ajuste parâmetros (ex.: tolerância/ganho) "
                             "ou verifique se a função está em fallback."
@@ -296,4 +335,4 @@ st.markdown("Dica: Coloque imagens em **entradas/** para testá-las rapidamente.
 st.divider()
 with st.expander("Créditos", expanded=False):
     st.caption("Processamento de Imagens de Computação Gráfica · Universidade Tiradentes (UNIT/SE) · Ciências da Computação · Prof.ª Layse Santos Souza · 2º/2025")
-    st.markdown("Ricardo D. Xavier · Lênio M. de Moura Morais · Caio F. H. Góis · Renan S. Ferreira · Tágore C. Paraizo")
+    st.markdown("Caio F. H. Góis · Lênio M. de Moura Morais · Renan S. Ferreira · Ricardo D. Xavier · Tágore C. Paraizo")
