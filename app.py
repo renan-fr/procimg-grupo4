@@ -196,7 +196,7 @@ with right:
         "compara-canais",
         "calcular-estatisticas",
         "graficos-dispersao",
-        # futuros: "calcular-variacoes"
+        "calcular-variacoes",
     ]
 
     # Filtra pela disponibilidade real em ops_mod.OPS
@@ -300,6 +300,50 @@ with right:
 
         st.caption("Dica: use 10–30% de amostragem para imagens grandes. Em HSV, H∈[0,179], S/V∈[0,255].")
 
+    elif op == "calcular-variacoes":
+        # origem A = imagem atual (entrada)
+        a.space = st.selectbox("Espaço de comparação", ["hsv", "rgb", "lab"], index=0, key="var_space")
+
+        # referência B = saída anterior OU outra imagem
+        modo_ref = st.radio("Comparar com", ["Saída anterior", "Outra imagem"], horizontal=True, key="var_modo")
+
+        img_ref = None
+        if modo_ref == "Saída anterior":
+            img_ref = st.session_state.get("ultima_saida_bgr")
+            if img_ref is None:
+                st.warning("Sem 'saída anterior' salva ainda. Rode uma transformação primeiro ou selecione 'Outra imagem'.")
+        else:
+            up2 = st.file_uploader("Envie a imagem de comparação (PNG/JPG)", type=["png", "jpg", "jpeg"], key="var_upload")
+            if up2 is not None:
+                arr2 = np.frombuffer(up2.read(), dtype=np.uint8)
+                img_ref = cv.imdecode(arr2, cv.IMREAD_COLOR)
+
+        # canais e visualização
+        if a.space == "rgb":
+            all_ch = ["R", "G", "B"]
+        elif a.space == "lab":
+            all_ch = ["L", "A", "B"]
+        else:
+            all_ch = ["H", "S", "V"]
+
+        sel = st.multiselect("Canais (1–3)", all_ch, default=all_ch, key="var_ch")
+        a.channels = sel if sel else all_ch
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            a.heatmaps = st.checkbox("Mostrar heatmaps", value=True, key="var_hm")
+        with c2:
+            a.colormap = st.selectbox("Colormap", ["TURBO", "JET", "INFERNO", "PLASMA", "MAGMA", "CIVIDIS"], index=0, key="var_cmap")
+        with c3:
+            st.caption("Dica: ΔH trata circularidade (0–179). ΔS/ΔV/ΔRGB são diferenças absolutas.")
+
+        # injeta img_ref no args
+        if img_ref is not None:
+            a.img_ref = img_ref
+        else:
+            # força uma mensagem na execução se não houver referência
+            a.img_ref = None
+
     else:
         # Modo Analisar → normalmente sem parâmetros adicionais
         st.warning("Operação sem UI dedicada — nenhum parâmetro adicional.")
@@ -340,6 +384,11 @@ with right:
                         )
                 st.success("Operação concluída.")
                 show_image(f"Saída — {op}", out_img)
+                try:
+                    if MODO == "Transformar":
+                        st.session_state["ultima_saida_bgr"] = out_img.copy()
+                except Exception:
+                    pass
                 stem = "upload" if origem == "upload" else Path(origem).stem
                 out_path = SAIDAS_DIR / f"{stem}__{op}.png"
                 cv.imwrite(str(out_path), out_img)

@@ -674,6 +674,135 @@ def _graficos_dispersao_core(
     png_bgr = cv.imdecode(data, cv.IMREAD_COLOR)
     return {"img": png_bgr}
 
+# ---------- calcular-variacoes ----------
+def _calcular_variacoes_core(
+    img_a_bgr: np.ndarray,              # imagem base (antes)
+    img_b_bgr: np.ndarray,              # imagem comparada (depois)
+    space: str = "hsv",
+    channels: list[str] | None = None,  # subset dos canais p/ exibir ["H","S","V"]
+    make_heatmaps: bool = True,
+    colormap: str = "TURBO",            # OpenCV: "TURBO", "JET", "INFERNO", ...
+) -> dict:
+    """
+    Compara img_b em relação à img_a no espaço escolhido (padrão HSV).
+    Retorna {'img': ndarray BGR} com: tabela de métricas + heatmaps (opcional).
+    """
+    import matplotlib.pyplot as _plt
+    import io as _io
+
+    # --- Garantias: dtype e tamanho iguais ---
+    if img_a_bgr is None or img_b_bgr is None:
+        return {"img": img_a_bgr}  # nada a fazer
+
+    if img_a_bgr.dtype != np.uint8:
+        img_a_bgr = img_a_bgr.astype(np.uint8)
+    if img_b_bgr.dtype != np.uint8:
+        img_b_bgr = img_b_bgr.astype(np.uint8)
+
+    hA, wA = img_a_bgr.shape[:2]
+    hB, wB = img_b_bgr.shape[:2]
+    if (hA, wA) != (hB, wB):
+        # usa INTER_AREA para reduzir, INTER_LINEAR para ampliar
+        inter = cv.INTER_AREA if (hB * wB) > (hA * wA) else cv.INTER_LINEAR
+        img_b_bgr = cv.resize(img_b_bgr, (wA, hA), interpolation=inter)
+
+    # --- Espaço de cor ---
+    s = (space or "hsv").lower()
+    if s == "rgb":
+        A = cv.cvtColor(img_a_bgr, cv.COLOR_BGR2RGB)
+        B = cv.cvtColor(img_b_bgr, cv.COLOR_BGR2RGB)
+        labels = ("R", "G", "B")
+        ranges = [(0, 256), (0, 256), (0, 256)]
+    elif s == "lab":
+        A = cv.cvtColor(img_a_bgr, cv.COLOR_BGR2LAB)
+        B = cv.cvtColor(img_b_bgr, cv.COLOR_BGR2LAB)
+        labels = ("L", "A", "B")
+        ranges = [(0, 256), (0, 256), (0, 256)]
+    else:
+        A = cv.cvtColor(img_a_bgr, cv.COLOR_BGR2HSV)
+        B = cv.cvtColor(img_b_bgr, cv.COLOR_BGR2HSV)
+        labels = ("H", "S", "V")
+        ranges = [(0, 180), (0, 256), (0, 256)]
+
+    if channels:
+        channels = [c.upper() for c in channels if c.upper() in labels]
+        if not channels:
+            channels = list(labels)
+    else:
+        channels = list(labels)
+
+    chA = [A[..., 0], A[..., 1], A[..., 2]]
+    chB = [B[..., 0], B[..., 1], B[..., 2]]
+
+    name_to_idx = {lab: i for i, lab in enumerate(labels)}
+    rows = []
+    heat_imgs_rgb = []
+
+    cv_cmap = getattr(cv, f"COLORMAP_{colormap.upper()}", cv.COLORMAP_TURBO)
+
+    for lab in channels:
+        i = name_to_idx[lab]
+        a = chA[i].astype(np.int16)
+        b = chB[i].astype(np.int16)
+
+        # H (HSV) é circular — usa menor arco
+        if s == "hsv" and lab == "H":
+            diff = np.abs(a - b)
+            diff = np.minimum(diff, 180 - diff)  # 0..179
+            signed = (b - a)                      # informativo
+            absdiff = diff.astype(np.float32)
+            maxv = 90.0
+        else:
+            d = (b - a).astype(np.int16)
+            signed = d
+            absdiff = np.abs(d).astype(np.float32)
+            maxv = 255.0
+
+        mean_signed = float(np.mean(signed))
+        mean_abs = float(np.mean(absdiff))
+        vmin = float(np.min(absdiff))
+        vmax = float(np.max(absdiff))
+        rows.append([lab, f"{mean_signed:+.2f}", f"{mean_abs:.2f}", f"{vmin:.2f}", f"{vmax:.2f}"])
+
+        if make_heatmaps:
+            # normaliza |Δ| para 0..255 e aplica colormap
+            norm = np.clip((absdiff * (255.0 / max(1e-6, maxv))), 0, 255).astype(np.uint8)
+            cm = cv.applyColorMap(norm, cv_cmap)
+            heat_imgs_rgb.append(cv.cvtColor(cm, cv.COLOR_BGR2RGB))
+
+    # --- Figura: tabela + heatmaps ---
+    n_hmaps = len(heat_imgs_rgb) if make_heatmaps else 0
+    fig_w = 8 if n_hmaps <= 1 else (12 if n_hmaps == 2 else 16)
+    fig_h = 3.0 + (3.2 if n_hmaps else 0.6)
+
+    fig = _plt.figure(figsize=(fig_w, fig_h), dpi=140)
+    gs = fig.add_gridspec(2 if n_hmaps else 1, max(1, n_hmaps), hspace=0.35, wspace=0.25)
+
+    ax_tbl = fig.add_subplot(gs[0, :]) if n_hmaps else fig.add_subplot(gs[0])
+    ax_tbl.axis("off")
+    headers = ["Canal", "Δ médio (com sinal)", "|Δ| médio", "min |Δ|", "max |Δ|"]
+    tbl = ax_tbl.table(cellText=rows, colLabels=headers, loc="center")
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(9)
+    tbl.scale(1, 1.2)
+    ax_tbl.set_title(f"Variações — espaço {s.upper()}", fontsize=11, pad=8)
+
+    if n_hmaps:
+        for j in range(n_hmaps):
+            ax = fig.add_subplot(gs[1, j])
+            ax.imshow(heat_imgs_rgb[j])
+            ax.axis("off")
+            ax.set_title(f"Heatmap |Δ{channels[j]}|", fontsize=10, pad=4)
+
+    buf = _io.BytesIO()
+    _plt.tight_layout()
+    fig.savefig(buf, format="png", dpi=140, bbox_inches="tight", pad_inches=0.2)
+    _plt.close(fig)
+    buf.seek(0)
+    data = np.frombuffer(buf.getvalue(), dtype=np.uint8)
+    png_bgr = cv.imdecode(data, cv.IMREAD_COLOR)
+    return {"img": png_bgr}
+    
 
 # ---------- Registro de operações ----------
 OPS = {
@@ -765,6 +894,16 @@ OPS = {
         sample=int(getattr(a, "sample", 20)),
         max_points=int(getattr(a, "max_points", 50000)),
         alpha=float(getattr(a, "alpha", 0.4)),
+    ),
+
+    # variações entre imagens (antes×depois) com métricas e heatmaps
+    "calcular-variacoes": lambda img, a: _calcular_variacoes_core(
+        img,
+        getattr(a, "img_ref", img),                    # se não vier, compara com a própria (no-op)
+        space=getattr(a, "space", "hsv"),
+        channels=getattr(a, "channels", ["H", "S", "V"]),
+        make_heatmaps=bool(getattr(a, "heatmaps", True)),
+        colormap=getattr(a, "colormap", "TURBO"),
     ),
 
 
