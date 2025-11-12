@@ -582,6 +582,98 @@ def _calcular_estatisticas_core(img_bgr: np.ndarray, spaces: list[str] | None = 
     png_bgr = cv.imdecode(data, cv.IMREAD_COLOR)
     return {"img": png_bgr}
 
+# ---------- graficos-dispersao ----------
+def _graficos_dispersao_core(
+    img_bgr: np.ndarray,
+    space: str = "hsv",
+    pairs: list[str] | None = None,
+    sample: int = 20,          # porcentagem da imagem a amostrar (1–100)
+    max_points: int = 50000,   # teto absoluto de pontos
+    alpha: float = 0.4,        # transparência dos pontos
+) -> dict:
+    """
+    Gera uma figura com gráficos de dispersão para pares de canais do espaço escolhido.
+    Suporta RGB, HSV, LAB. Retorna {'img': ndarray BGR}.
+    """
+    import matplotlib.pyplot as _plt
+    import io as _io
+
+    s = (space or "hsv").lower()
+    if s == "rgb":
+        work = cv.cvtColor(img_bgr, cv.COLOR_BGR2RGB)
+        labels = ("R", "G", "B")
+        default_pairs = ["R×G", "R×B", "G×B"]
+        ranges = [(0, 256), (0, 256), (0, 256)]
+    elif s == "hsv":
+        work = cv.cvtColor(img_bgr, cv.COLOR_BGR2HSV)
+        labels = ("H", "S", "V")
+        default_pairs = ["H×S", "H×V", "S×V"]
+        ranges = [(0, 180), (0, 256), (0, 256)]  # H 0–179 no OpenCV
+    elif s == "lab":
+        work = cv.cvtColor(img_bgr, cv.COLOR_BGR2LAB)
+        labels = ("L", "A", "B")
+        default_pairs = ["L×A", "L×B", "A×B"]
+        ranges = [(0, 256), (0, 256), (0, 256)]
+    else:
+        return {"img": img_bgr}
+
+    pairs = pairs or default_pairs
+    # mapeia nome -> índice
+    idx = {labels[0]: 0, labels[1]: 1, labels[2]: 2}
+
+    h, w = work.shape[:2]
+    total = h * w
+    frac = max(1, min(100, int(sample))) / 100.0
+    n = min(int(total * frac), int(max_points))
+
+    # amostragem aleatória
+    rs = np.random.default_rng(12345)  # fixo p/ reprodutibilidade
+    ys = rs.integers(0, h, size=n, endpoint=False)
+    xs = rs.integers(0, w, size=n, endpoint=False)
+
+    # pega canais amostrados
+    ch0 = work[..., 0][ys, xs].astype(np.float32)
+    ch1 = work[..., 1][ys, xs].astype(np.float32)
+    ch2 = work[..., 2][ys, xs].astype(np.float32)
+    CH = [ch0, ch1, ch2]
+
+    # figura: 1..3 gráficos (até 3 pares)
+    k = min(3, len(pairs))
+    fig_w = 4 * k + 2  # preview opcional não usado aqui -> só os scatters
+    fig = _plt.figure(figsize=(fig_w, 4), dpi=140)
+    _plt.subplots_adjust(wspace=0.35, bottom=0.18, top=0.88)
+
+    for i in range(k):
+        p = pairs[i].upper().replace("X", "×")
+        try:
+            a_lab, b_lab = p.split("×")
+            a_lab = a_lab.strip()
+            b_lab = b_lab.strip()
+        except Exception:
+            continue
+        if a_lab not in idx or b_lab not in idx:
+            continue
+        a_i, b_i = idx[a_lab], idx[b_lab]
+        ax = fig.add_subplot(1, k, i + 1)
+        ax.scatter(CH[a_i], CH[b_i], s=2, alpha=float(alpha), edgecolors="none")
+        ax.set_xlabel(a_lab)
+        ax.set_ylabel(b_lab)
+        # limites coerentes com o espaço
+        ax.set_xlim(ranges[a_i])
+        ax.set_ylim(ranges[b_i])
+        ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.6)
+        ax.set_title(f"{s.upper()} — {a_lab}×{b_lab}", fontsize=10)
+
+    # exporta a figura para PNG -> BGR
+    import io as _io
+    buf = _io.BytesIO()
+    fig.savefig(buf, format="png", dpi=140)
+    _plt.close(fig)
+    buf.seek(0)
+    data = np.frombuffer(buf.getvalue(), dtype=np.uint8)
+    png_bgr = cv.imdecode(data, cv.IMREAD_COLOR)
+    return {"img": png_bgr}
+
 
 # ---------- Registro de operações ----------
 OPS = {
@@ -664,6 +756,17 @@ OPS = {
         img,
         spaces=getattr(a, "spaces", ["rgb", "hsv", "lab"]),
     ),
+
+    # gráficos de dispersão entre pares de canais
+    "graficos-dispersao": lambda img, a: _graficos_dispersao_core(
+        img,
+        space=getattr(a, "space", "hsv"),
+        pairs=getattr(a, "pairs", None),
+        sample=int(getattr(a, "sample", 20)),
+        max_points=int(getattr(a, "max_points", 50000)),
+        alpha=float(getattr(a, "alpha", 0.4)),
+    ),
+
 
 }
 
