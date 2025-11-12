@@ -195,7 +195,8 @@ with right:
         "separar-canais",
         "compara-canais",
         "calcular-estatisticas",
-        # futuros: "graficos-dispersao", "calcular-variacoes"
+        "graficos-dispersao",
+        # futuros: "calcular-variacoes"
     ]
 
     # Filtra pela disponibilidade real em ops_mod.OPS
@@ -273,6 +274,31 @@ with right:
         sel = st.multiselect("Espaços de cor", ["rgb", "hsv", "lab"], default=["rgb", "hsv", "lab"], key="stats_spaces")
         a.spaces = sel if sel else ["rgb", "hsv", "lab"]
         st.caption("Calcula média, desvio padrão, mínimo, máximo e mediana por canal.")
+
+    elif op == "graficos-dispersao":
+        a.space = st.selectbox("Espaço de cor", ["hsv", "rgb", "lab"], index=0, key="disp_space")
+
+        # pares por espaço (labels coerentes com cada espaço)
+        if a.space == "rgb":
+            all_pairs = ["R×G", "R×B", "G×B"]
+        elif a.space == "lab":
+            all_pairs = ["L×A", "L×B", "A×B"]
+        else:
+            all_pairs = ["H×S", "H×V", "S×V"]  # hsv (padrão)
+
+        sel_pairs = st.multiselect("Pares (máx. 3)", all_pairs, default=all_pairs[:3], key="disp_pairs")
+        # limita a 3 pares
+        a.pairs = sel_pairs[:3] if sel_pairs else all_pairs[:3]
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            a.sample = st.slider("Amostra (%)", 1, 100, 20, step=1, key="disp_sample")
+        with c2:
+            a.max_points = st.number_input("Máx. pontos", min_value=1000, max_value=200000, value=50000, step=1000, key="disp_maxp")
+        with c3:
+            a.alpha = st.slider("Transparência (alpha)", 0.1, 1.0, 0.4, step=0.1, key="disp_alpha")
+
+        st.caption("Dica: use 10–30% de amostragem para imagens grandes. Em HSV, H∈[0,179], S/V∈[0,255].")
 
     else:
         # Modo Analisar → normalmente sem parâmetros adicionais
