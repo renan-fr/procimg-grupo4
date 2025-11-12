@@ -13,7 +13,6 @@ import cv2 as cv
 
 DEBUG_OPS = True  # deixe True por enquanto para ver logs no terminal
 
-
 # ---------- util: normalização de imagens ----------
 def _pil_to_bgr(img_any):
     """Converte PIL.Image ou arrays RGB/GRAY/RGBA para BGR uint8 (OpenCV)."""
@@ -328,6 +327,80 @@ def _call_substituir_cor(fn, img, **params):
     params_rgb["destino"] = bgr_to_rgb(cor_destino)
     return _call(fn, img, **params_rgb)
 
+# ------------------------------------------------------------
+# equaliza-canais (núcleo) — retorna {'img': BGR}
+# ------------------------------------------------------------
+def _equaliza_canais_core(
+    img_bgr: "np.ndarray",
+    space: str = "lab",          # "rgb" | "hsv" | "lab"
+    metodo: str = "clahe",       # "clahe" | "hist"
+    canais=None,                 # None => todos; ex.: [0], [0,1]
+    clip: float = 3.0,           # CLAHE
+    tiles: int = 8,              # CLAHE (tiles x tiles)
+) -> dict:
+    """
+    Equaliza contraste por canal no espaço escolhido.
+    Retorna {'img': ndarray BGR} para encaixar no app atual.
+    """
+    s = (space or "lab").lower()
+
+    # BGR -> espaço alvo
+    if s == "rgb":
+        work = cv.cvtColor(img_bgr, cv.COLOR_BGR2RGB)
+    elif s == "hsv":
+        work = cv.cvtColor(img_bgr, cv.COLOR_BGR2HSV)
+    elif s == "lab":
+        work = cv.cvtColor(img_bgr, cv.COLOR_BGR2LAB)
+    else:
+        if DEBUG_OPS:
+            print(f"[equaliza-canais] espaço inválido: {space}. Mantendo BGR.")
+        return {"img": img_bgr}
+
+    # separa canais
+    if work.ndim == 2:
+        chs = [work]
+    else:
+        chs = [work[..., 0], work[..., 1], work[..., 2]]
+
+    if canais is None:
+        canais = list(range(len(chs)))
+
+    # equalização
+    metodo = (metodo or "clahe").lower()
+    if metodo == "hist":
+        for i in canais:
+            chs[i] = cv.equalizeHist(chs[i])
+    elif metodo == "clahe":
+        clahe = cv.createCLAHE(
+            clipLimit=float(clip if clip is not None else 3.0),
+            tileGridSize=(int(tiles or 8), int(tiles or 8)),
+        )
+        for i in canais:
+            chs[i] = clahe.apply(chs[i])
+    else:
+        if DEBUG_OPS:
+            print(f"[equaliza-canais] método desconhecido: {metodo}. Sem alteração.")
+
+    # junta e volta pra BGR
+    if len(chs) == 1:
+        merged = chs[0]
+        if s == "rgb":
+            out_bgr = cv.cvtColor(merged, cv.COLOR_RGB2BGR)
+        elif s == "hsv":
+            out_bgr = cv.cvtColor(merged, cv.COLOR_HSV2BGR)
+        else:
+            out_bgr = cv.cvtColor(merged, cv.COLOR_LAB2BGR)
+        return {"img": out_bgr}
+
+    work2 = np.stack(chs, axis=-1)
+    if s == "rgb":
+        out_bgr = cv.cvtColor(work2, cv.COLOR_RGB2BGR)
+    elif s == "hsv":
+        out_bgr = cv.cvtColor(work2, cv.COLOR_HSV2BGR)
+    else:
+        out_bgr = cv.cvtColor(work2, cv.COLOR_LAB2BGR)
+    return {"img": out_bgr}
+
 # ==== helpers p/ adaptar UI -> funções ====
 def _h_to_nome(h: int) -> str:
     pal = [
@@ -340,6 +413,174 @@ def _bgr_to_h(bgr: tuple[int,int,int]) -> int:
     patch = np.uint8([[bgr]])  # (1,1,3) BGR
     hsv = cv.cvtColor(patch, cv.COLOR_BGR2HSV)
     return int(hsv[0,0,0])
+
+# ---------- separar-canais ----------
+def _separar_canais(img_bgr: np.ndarray) -> dict:
+    """Gera uma grade 3x3 (RGB/HSV/LAB) com legenda fora do tile (topo/rodapé)."""
+    rgb = cv.cvtColor(img_bgr, cv.COLOR_BGR2RGB)
+    hsv = cv.cvtColor(img_bgr, cv.COLOR_BGR2HSV)
+    lab = cv.cvtColor(img_bgr, cv.COLOR_BGR2LAB)
+
+    def put_label_outside(tile: np.ndarray, text: str, position: str = "bottom") -> np.ndarray:
+        """Adiciona uma barra de legenda fora do tile (top/bottom), com texto centralizado."""
+        h, w = tile.shape[:2]
+        bar_h = max(24, h // 10)  # ~10% da altura, mínimo 24px
+        bar = np.zeros((bar_h, w, 3), dtype=np.uint8)  # barra preta
+
+        font = cv.FONT_HERSHEY_SIMPLEX
+        scale = max(1.2, min(2.5, w / 300.0))
+        thickness = max(2, int(scale * 4))
+        (tw, th), base = cv.getTextSize(text, font, scale, thickness)
+
+        tx = max(4, (w - tw) // 2)
+        ty = max(th + 4, (bar_h + th) // 2)  # verticalmente centralizado na barra
+        cv.putText(bar, text, (tx, ty), font, scale, (255, 255, 255), thickness, cv.LINE_AA)
+
+        if position == "top":
+            return np.vstack([bar, tile])
+        return np.vstack([tile, bar])  # bottom
+
+    def vis(img_space: np.ndarray, labels: tuple[str, str, str]) -> np.ndarray:
+        ch = cv.split(img_space)
+        tiles = []
+        for c, lab_txt in zip(ch, labels):
+            c8 = cv.normalize(c, None, 0, 255, cv.NORM_MINMAX).astype(np.uint8)
+            tile = cv.cvtColor(c8, cv.COLOR_GRAY2BGR)
+            tiles.append(put_label_outside(tile, lab_txt, position="bottom"))
+        # todas têm altura igual (tile + barra); empilha lado a lado
+        return np.hstack(tiles)
+
+    row_rgb = vis(rgb, ("R", "G", "B"))
+    row_hsv = vis(hsv, ("H", "S", "V"))
+    row_lab = vis(lab, ("L", "A", "B"))
+
+    # garante mesmo tamanho entre linhas antes de empilhar
+    w = max(row_rgb.shape[1], row_hsv.shape[1], row_lab.shape[1])
+    h = max(row_rgb.shape[0], row_hsv.shape[0], row_lab.shape[0])
+    fit = lambda im: cv.resize(im, (w, h), interpolation=cv.INTER_AREA)
+
+    grid = np.vstack([fit(row_rgb), fit(row_hsv), fit(row_lab)])
+    return {"img": grid}
+
+# ---------- comparar-canais ----------
+def _compara_canais_core(img_bgr: np.ndarray, space: str = "rgb", bins: int = 64) -> dict:
+    """
+    Gera uma figura com PREVIEW + 3 histogramas (um por canal) no espaço escolhido.
+    Retorna {'img': ndarray BGR} para exibição/ download no app.
+    """
+    import matplotlib.pyplot as _plt
+    import io as _io
+
+    s = (space or "rgb").lower()
+    if s == "rgb":
+        work = cv.cvtColor(img_bgr, cv.COLOR_BGR2RGB)
+        labels = ("R", "G", "B")
+        ranges = [(0, 256), (0, 256), (0, 256)]
+        colors = ["r", "g", "b"]
+    elif s == "hsv":
+        work = cv.cvtColor(img_bgr, cv.COLOR_BGR2HSV)
+        labels = ("H", "S", "V")
+        ranges = [(0, 180), (0, 256), (0, 256)]  # OpenCV: H 0–179
+        colors = ["m", "g", "k"]  # só pra diferenciar; não impacta o BGR final
+    elif s == "lab":
+        work = cv.cvtColor(img_bgr, cv.COLOR_BGR2LAB)
+        labels = ("L", "A", "B")
+        ranges = [(0, 256), (0, 256), (0, 256)]
+        colors = ["k", "c", "y"]
+    else:
+        return {"img": img_bgr}
+
+    chs = [work[..., 0], work[..., 1], work[..., 2]]
+
+    # --- monta figura: 2x2 (preview + 3 histos) ---
+    fig = _plt.figure(figsize=(8, 6), dpi=140)
+    gs = fig.add_gridspec(2, 2, height_ratios=[1, 1], width_ratios=[1, 1], hspace=0.35, wspace=0.25)
+
+    # Preview (canto superior esquerdo)
+    ax0 = fig.add_subplot(gs[0, 0])
+    # mostrar preview sempre em RGB
+    prev_rgb = cv.cvtColor(img_bgr, cv.COLOR_BGR2RGB)
+    ax0.imshow(prev_rgb)
+    ax0.set_title("Preview", fontsize=10)
+    ax0.axis("off")
+
+    # Histogramas (H1, H2, H3)
+    for i, (ch, lab, rng, col) in enumerate(zip(chs, labels, ranges, colors), start=1):
+        r_idx = 0 if i == 1 else 1
+        c_idx = 1 if i == 1 else (0 if i == 2 else 1)  # coloca 1º hist em (0,1), 2º em (1,0), 3º em (1,1)
+        ax = fig.add_subplot(gs[r_idx, c_idx])
+        ax.hist(ch.ravel(), bins=int(bins), range=rng, color=col, alpha=0.85)
+        ax.set_title(f"Canal {lab}", fontsize=10)
+        ax.set_xlim(rng)
+        ax.grid(True, linestyle=":", linewidth=0.6, alpha=0.6)
+        ax.tick_params(labelsize=8)
+
+    # Exporta figura para PNG e volta como BGR
+    buf = _io.BytesIO()
+    _plt.tight_layout()
+    fig.savefig(buf, format="png", dpi=140)
+    _plt.close(fig)
+    buf.seek(0)
+    data = np.frombuffer(buf.getvalue(), dtype=np.uint8)
+    png_bgr = cv.imdecode(data, cv.IMREAD_COLOR)  # já vem BGR via OpenCV
+    return {"img": png_bgr}
+
+# ---------- calcular_estatisticas ----------
+def _calcular_estatisticas_core(img_bgr: np.ndarray, spaces: list[str] | None = None) -> dict:
+    """
+    Gera uma imagem com uma tabela de estatísticas por canal (mean, std, min, max, median)
+    para os espaços selecionados (RGB/HSV/LAB). Retorna {'img': ndarray BGR}.
+    """
+    import matplotlib.pyplot as _plt
+    import io as _io
+
+    spaces = spaces or ["rgb", "hsv", "lab"]
+    rows = []
+
+    def stats_of(ch: np.ndarray) -> tuple[float, float, int, int, float]:
+        v = ch.ravel()
+        return float(np.mean(v)), float(np.std(v)), int(np.min(v)), int(np.max(v)), float(np.median(v))
+
+    for s in spaces:
+        s_low = s.lower()
+        if s_low == "rgb":
+            work = cv.cvtColor(img_bgr, cv.COLOR_BGR2RGB)
+            labs = ("R", "G", "B")
+        elif s_low == "hsv":
+            work = cv.cvtColor(img_bgr, cv.COLOR_BGR2HSV)
+            labs = ("H", "S", "V")
+        elif s_low == "lab":
+            work = cv.cvtColor(img_bgr, cv.COLOR_BGR2LAB)
+            labs = ("L", "A", "B")
+        else:
+            continue
+
+        chs = [work[..., 0], work[..., 1], work[..., 2]]
+        for lab, ch in zip(labs, chs):
+            mean, std, vmin, vmax, med = stats_of(ch)
+            rows.append([s_low.upper(), lab, f"{mean:.1f}", f"{std:.1f}", vmin, vmax, f"{med:.1f}"])
+
+    # Desenha tabela como imagem
+    headers = ["Espaço", "Canal", "Média", "Desvio", "Mín", "Máx", "Mediana"]
+    n = max(1, len(rows))
+    fig_h = 1.0 + 0.28 * n  # altura aproxima (linhas)
+    fig = _plt.figure(figsize=(8, fig_h), dpi=140)
+    ax = fig.add_subplot(111)
+    ax.axis("off")
+    tbl = ax.table(cellText=rows, colLabels=headers, loc="center")
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(8)
+    tbl.scale(1, 1.2)
+    ax.set_title("Estatísticas por Canal", fontsize=10, pad=8)
+
+    buf = _io.BytesIO()
+    _plt.tight_layout()
+    fig.savefig(buf, format="png", dpi=140, bbox_inches="tight", pad_inches=0.2)
+    _plt.close(fig)
+    buf.seek(0)
+    data = np.frombuffer(buf.getvalue(), dtype=np.uint8)
+    png_bgr = cv.imdecode(data, cv.IMREAD_COLOR)
+    return {"img": png_bgr}
 
 
 # ---------- Registro de operações ----------
@@ -398,8 +639,33 @@ OPS = {
         img,
         deslocamento_hue=int(getattr(a, "hue", 30)),
     ),
-}
 
+    # equalização por canal (compatível com UI atual – 1 imagem)
+    "equaliza-canais": lambda img, a: _equaliza_canais_core(
+        img,
+        space=getattr(a, "space", "lab"),       # padrão LAB
+        metodo=getattr(a, "metodo", "clahe"),   # "clahe" | "hist"
+        canais=getattr(a, "canais", None),      # None => todos
+        clip=getattr(a, "clip", 3.0),
+        tiles=getattr(a, "tiles", 8),
+    ),
+
+    # separa canais (RGB | HSV | LAB) em grade 1x3
+    "separar-canais": lambda img, a: _separar_canais(img),
+
+        "compara-canais": lambda img, a: _compara_canais_core(
+        img,
+        space=getattr(a, "space", "rgb"),
+        bins=int(getattr(a, "bins", 64)),
+    ),
+
+    # estatísticas por canal (tabela-figura)
+    "calcular-estatisticas": lambda img, a: _calcular_estatisticas_core(
+        img,
+        spaces=getattr(a, "spaces", ["rgb", "hsv", "lab"]),
+    ),
+
+}
 
 # ---------- dessaturacao-seletiva (mapeamento limpo) ----------
 from typing import Any as _Any
