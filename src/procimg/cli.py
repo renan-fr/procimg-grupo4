@@ -144,8 +144,13 @@ def run(
 
     dispatch = _resolve_dispatch()
     out_img = dispatch(op, img, params)
+
+    if isinstance(out_img, dict) and isinstance(out_img.get("img"), np.ndarray):
+        out_img = out_img["img"]
+
     if not isinstance(out_img, np.ndarray):
         raise TypeError("A operação não retornou uma imagem (np.ndarray)")
+
 
     if out:
         out_path = Path(out)

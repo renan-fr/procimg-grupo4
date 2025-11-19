@@ -127,13 +127,13 @@ http://localhost:8501
 Listar operações:
 
 ```bash
-python -m procimg.cli list
+python -m procimg.cli ops
 ```
 
 Executar operação:
 
 ```bash
-python -m procimg.cli run --op mapear-cores --in entradas/imagem.png
+python -m procimg.cli run --op mapear-cores --in imagem_mapear_cores.jpg
 ```
 
 ---
