@@ -155,3 +155,10 @@ python -m procimg.cli run --op mapear-cores --in entradas/imagem.png
 
 Projeto desenvolvido pelo **Grupo 4** da disciplina de **Processamento de Imagens de Computação Gráfica** — UNIT, 2025.  
 Orientação: **Profª Layse Santos Souza**.
+
+**Integrantes do Grupo 4:**
+- **Caio Felipe Honorato Góis**
+- **Lenio Macedo Moura Morais**
+- **Renan Silva Ferreira**
+- **Ricardo Dias Xavier**
+- **Tágore Campos Paraizo**
