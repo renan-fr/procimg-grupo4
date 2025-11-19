@@ -1,4 +1,4 @@
-# 🧠 Sistema de Análise e Manipulação de Canais de Cor (ProcIMG - Grupo 4)
+# Sistema de Análise e Manipulação de Canais de Cor (ProcIMG - Grupo 4)
 ### Disciplina: Processamento de Imagens de Computação Gráfica — UNIT
 
 ![Python](https://img.shields.io/badge/Python-3.12+-blue)

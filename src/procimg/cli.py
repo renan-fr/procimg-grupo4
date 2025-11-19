@@ -10,7 +10,7 @@ from rich.table import Table
 import types
 
 try:
-    from . import ops as ops_mod  # módulo com suas operações
+    from . import ops as ops_mod  
 except Exception as e:
     ops_mod = None
     _ops_import_err = e
@@ -59,18 +59,12 @@ def _parse_params(kv_list: list[str] | None) -> dict[str, Any]:
     return out
 
 def _resolve_dispatch() -> Callable[[str, np.ndarray, dict[str, Any]], np.ndarray]:
-    """
-    Prioridade:
-    1) ops.dispatch(op, img, **params)
-    2) ops.OPS[op](img, **params)
-    3) getattr(ops, op)(img, **params)
-    """
     if ops_mod is None:
         raise RuntimeError(f"Não foi possível importar procimg.ops: {_ops_import_err}")
 
     if hasattr(ops_mod, "dispatch"):
         def _call1(op: str, img: np.ndarray, params: dict[str, Any]) -> np.ndarray:
-            return ops_mod.dispatch(op, img, **params)  # type: ignore[attr-defined]
+            return ops_mod.dispatch(op, img, **params)  
         return _call1
 
     if hasattr(ops_mod, "OPS"):
@@ -80,12 +74,10 @@ def _resolve_dispatch() -> Callable[[str, np.ndarray, dict[str, Any]], np.ndarra
                 raise KeyError(f"Operação não encontrada em OPS: {op}")
             fn = OPS[op]
 
-            # cria um namespace simulando 'args' para compatibilidade
             args = types.SimpleNamespace(**params)
             try:
-                return fn(img, args)  # compatível com funções do tipo (img, args)
+                return fn(img, args)  
             except TypeError:
-                # fallback: tenta o formato antigo (img, **params)
                 return fn(img, **params)
         return _call2
 
@@ -95,7 +87,7 @@ def _resolve_dispatch() -> Callable[[str, np.ndarray, dict[str, Any]], np.ndarra
         fn = getattr(ops_mod, op)
         if not callable(fn):
             raise TypeError(f"Símbolo não chamável em ops: {op}")
-        return fn(img, **params)  # type: ignore[misc]
+        return fn(img, **params) 
     return _call3
 
 def _discover_ops() -> list[str]:
@@ -117,7 +109,6 @@ def _discover_ops() -> list[str]:
 
 @app.command("ops")
 def list_ops():
-    """Lista operações detectadas em procimg.ops."""
     ops = _discover_ops()
     if not ops:
         if _ops_import_err:
@@ -139,10 +130,8 @@ def run(
     out: str | None = typer.Option(None, "--out", help="Arquivo de saída; se omitido, salva em saidas/<nome>__<op>.png"),
     param: list[str] = typer.Option(None, "--param", help="Parâmetros no formato k=v (pode repetir)"),
 ):
-    """Executa uma operação sobre uma imagem."""
     params = _parse_params(param)
 
-    # --- entrada: aceita nome simples e procura em 'entradas/' ---
     in_path = Path(inp)
     if not in_path.exists():
         alt = Path("entradas") / inp
@@ -153,13 +142,11 @@ def run(
 
     img = _read(str(in_path))
 
-    # --- operação ---
     dispatch = _resolve_dispatch()
     out_img = dispatch(op, img, params)
     if not isinstance(out_img, np.ndarray):
         raise TypeError("A operação não retornou uma imagem (np.ndarray)")
 
-    # --- saída: default automático em 'saidas/<stem>__<op>.png' ---
     if out:
         out_path = Path(out)
     else:

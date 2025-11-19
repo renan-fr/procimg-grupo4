@@ -1,7 +1,7 @@
 import cv2 as cv
 import numpy as np
 
-def analisar_canais(imagem_path):
+def calcular_estatisticas(imagem_path):
 
     img_bgr = cv.imread(imagem_path)
     if img_bgr is None:
