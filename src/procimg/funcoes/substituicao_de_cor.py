@@ -3,14 +3,12 @@ import numpy as np
 import matplotlib.pylab as plt
 
 def trocar_cor(img_bgr, cor_original='vermelho', cor_nova='azul', tolerancia_h=10, s_min=60, v_min=50, alpha=1.0):
-    """Substitui o H (matiz) na região da cor_original por cor_nova, preservando S/V.
-    Ajuste mínimo: recebe imagem como primeiro parâmetro e retorna dict.
-    """
+
     import numpy as np
     import cv2 as cv
-    assert img_bgr is not None and img_bgr.ndim==3 and img_bgr.shape[2]==3, "img_bgr inválida"
+    assert img_bgr is not None and img_bgr.ndim==3 and img_bgr.shape[2]==3, 
     hsv = cv.cvtColor(img_bgr, cv.COLOR_BGR2HSV).astype(np.float32)
-    # máscara da cor original (mesma lógica do isolamento)
+
     def faixa(h, tol): 
         return (max(0, h - tol), min(179, h + tol))
     cores_h = {
